@@ -7,16 +7,18 @@ import ctypes
 ctypes.windll.user32.SetProcessDPIAware()
 config_raw = configparser.RawConfigParser()
 config_raw.read('config.cfg')
-img_father_dir = os.path.dirname(config_raw.get('setting', 'img2open'))
-imglist = os.listdir(img_father_dir)
-imglist.sort(key=lambda x: int(x[:-4]))
-imglist = iter(imglist)
+if os.path.exists(config_raw.get('setting', 'img2open')):
+    img_father_dir = os.path.dirname(config_raw.get('setting', 'img2open'))
+    imglist = os.listdir(img_father_dir)
+    imglist.sort(key=lambda x: int(x[:-4]))
+    imglist = iter(imglist)
 
 
 class Window(Tk):
     def __init__(self):
         super().__init__()
         self.title('要测试的图片或视频:')
+        # self.wm_overrideredirect(True)
         self.geometry('1000x800')
         self.configure(background='gray')
         self.img_path = StringVar()
@@ -24,7 +26,6 @@ class Window(Tk):
         self.cnt = 0
         self.canvas = None
         self.show_photo = None
-        self.next_img = imglist.__next__
         Label(self, text='打开', fg='blue', bg='gray', font=('Fixdsys', 12))\
             .grid(row=0, column=0, ipady=10, sticky=E)
         Entry(self, textvariable=self.img_path, width=50).grid(row=0, column=1, columnspan=3)
@@ -41,39 +42,54 @@ class Window(Tk):
 
         self.dir = StringVar()
         self.dir.set(config_raw.get('setting', 'dir2open'))
+        self.cbb = ttk.Combobox(self, textvariable=self.dir, width=48, state='readonly')
+        self.cbb.grid(row=1, column=1, columnspan=3)
+        if os.path.exists(self.dir.get()):
+            dir_father_dir = os.path.dirname(self.dir.get())
+            dirs = []
+            for sub_dir in os.listdir(dir_father_dir):
+                dirs.append(dir_father_dir + os.sep + sub_dir)
+            self.cbb['values'] = dirs
+
         self.win_bgn_x = IntVar()
         self.win_bgn_y = IntVar()
         self.selecting = False
         self.lastDraw = None
         Label(self, text='保存目录', bg='gray', fg='blue', font=('Fixdsys', 12))\
             .grid(row=1, column=0, sticky=E)
-        self.cbb = ttk.Combobox(self, textvariable=self.dir, width=48, state='readonly')
-        dir_father_dir = os.path.dirname(self.dir.get())
-        dirs = []
-        for sub_dir in os.listdir(dir_father_dir):
-            dirs.append(dir_father_dir + os.sep + sub_dir)
-        self.cbb['values'] = dirs
-        self.cbb.grid(row=1, column=1, columnspan=3)
         Button(self, text='...', width=3, height=1, command=self.btn_dir_open)\
             .grid(row=1, column=4, sticky=W)
-        self.str = StringVar()
-        tmp = 'winx:' + str(self.winfo_x()) + '\twiny:' + str(self.winfo_y())
-        self.str.set(tmp)
-        self.test = Entry(self, textvariable=self.str).grid(row=1, column=5, columnspan=3)
 
         self.meg = StringVar()
         self.meg.set('快捷键还没搞好')
         Label(self, text='提示', bg='gray', fg='blue', font=('Fixdsys', 12))\
             .grid(row=2, column=0, ipady=10, sticky=SE)
-        Label(self, textvariable=self.meg, bg='gray', fg='red', font=('Fixdsys', 12))\
+        Label(self, textvariable=self.meg, bg='gray', fg='yellow', font=('Fixdsys', 12))\
             .grid(row=2, column=1, ipady=10, sticky=SE)
+        Button(self, text='quit', command=self.quit)\
+            .grid(row=1, column=5)
+
+
+    def next_img(self):
+        return imglist.__next__()
 
 
     def btn_open(self):
+        global imglist
         img2open = filedialog.askopenfilename()
+        img_file = open('config.cfg', 'w')
+        config_raw.set("setting", "img2open", img2open)
+        config_raw.write(img_file)
+        img_file.close()
         self.img_path.set(img2open)
         if os.path.exists(self.img_path.get()):
             self.meg.set('')
+        if not os.path.exists(self.dir.get()) or self.dir.get() is '':
+            self.meg.set('保存目录没有设置')
+        img_father_dir = os.path.dirname(img2open)
+        imglist = os.listdir(img_father_dir)
+        imglist.sort(key=lambda x: int(x[:-4]))
+        imglist = iter(imglist)
 
     def btn_show(self):
         img2open = self.img_path.get()
@@ -82,12 +98,10 @@ class Window(Tk):
         elif not os.path.exists(img2open):
             self.meg.set('不存在该文件')
         elif img2open.endswith(('.bmp', '.dib', '.png', '.jpg', '.jpeg', '.pbm', '.pgm', '.ppm', '.tif', '.tiff')):
-            # print(img2open)
             img = Image.open(img2open)
             self.show_photo = ImageTk.PhotoImage(img)
-            # photo = PhotoImage(img2open)
             self.canvas = Canvas(self, bg='gray', width=self.winfo_screenwidth()//2, height=self.winfo_screenheight()//2)
-            self.canvas.create_image(0, 0, anchor=CENTER, image=self.show_photo)
+            self.canvas.create_image(0, 0, anchor=NW, image=self.show_photo)
             self.canvas.bind('<B1-Motion>', self.onLeftButtonMove)
             self.canvas.bind('<ButtonRelease-1>', self.onLeftButtonUp)
             self.canvas.bind('<Button-1>', self.onLeftButtonDown)
@@ -95,9 +109,9 @@ class Window(Tk):
             # self.canvas.bind_all('<KeyPress-n>', self.onKeyDown)
             self.canvas.grid(row=3, column=1, columnspan=15)
             config_raw.set('setting', 'img2open', img2open)
-
         elif img2open.endswith(('avi', 'mp4', 'rmvb', 'flv')):
-            config_raw.set('setting', 'img2open', img2open)
+            # config_raw.set('setting', 'img2open', img2open)
+            self.meg.set('暂不支持视频格式')
         else:
             self.meg.set('文件类型错误')
 
@@ -114,6 +128,11 @@ class Window(Tk):
         config_raw.set('setting', 'dir2open', dir2open)
         if os.path.exists(dir2open):
             self.meg.set('')
+        dir_father_dir = os.path.dirname(self.dir.get())
+        dirs = []
+        for sub_dir in os.listdir(dir_father_dir):
+            dirs.append(dir_father_dir + os.sep + sub_dir)
+        self.cbb['values'] = dirs
 
     def onLeftButtonDown(self, event):
         self.win_bgn_x.set(event.x)
@@ -143,9 +162,10 @@ class Window(Tk):
         left, right = sorted([self.win_bgn_x.get(), event.x])
         top, bottom = sorted([self.win_bgn_y.get(), event.y])
         # pic = ImageGrab.grab((left+1, top+1, right, bottom))
-        pic = ImageGrab.grab((self.winfo_x()+left+1, self.winfo_y()+top+1, self.winfo_x()+right, self.winfo_y()+bottom))
-        self.str.set('winx:' + str(self.winfo_x()) + '  winy:' + str(self.winfo_y()) + '  dx:' + str(event.x) + '  dy:' + str(event.y))
-        # print(self.winfo_x(), left+1, self.winfo_y(), top+1, self.winfo_x(), right, self.winfo_y(), bottom)
+
+        self.update()
+        pic = ImageGrab.grab((self.winfo_x()+self.canvas.winfo_x()+left+1, self.winfo_y()+38+self.winfo_y()+top+1,
+                              self.winfo_x()+right, self.winfo_y()+bottom))
         while os.path.exists(self.dir.get() + os.sep + str(self.cnt) + '.jpg'):
             self.cnt += 1
         pic.save(self.dir.get() + os.sep + str(self.cnt) + '.jpg')
