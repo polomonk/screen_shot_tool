@@ -3,10 +3,9 @@ from tkinter import filedialog, ttk
 import os
 import cv2
 import threading
-import time
 from PIL import ImageGrab, Image, ImageTk
 import configparser
-# 去除屏幕分辨率的影响。遇坑立牌
+# 去除屏幕分辨率的影响。遇坑立碑
 import ctypes
 ctypes.windll.user32.SetProcessDPIAware()
 
@@ -34,9 +33,15 @@ class Window(Tk, threading.Thread):
         self.img_path.set(self.config_raw.get('setting', 'img2open'))        # 读取配置文件并赋值
         self.cnt = 0        # 对已保存的图片进行计数
         self.canvas = None      # 图片画板
+        self.hbar = None        # 画板的水平滚动条
+        self.vbar = None        # 画板的垂直滚动条
         self.show_photo = None  # 要在画板上显示的图片
-        self.cap = None     # 视频
+        self.cap = None     # 要在画板上显示的视频
+        self.img_h = -1     # 图片的高度和宽度信息
+        self.img_w = -1     #
         self.isPlaying = False      # 视频播放标志位
+        # self.canvas.bind_all('<KeyPress-q>', self.onKeyDown)      # 绑定快捷键
+        # self.canvas.bind_all('<KeyPress-n>', self.onKeyDown)
         Label(self, text='打开', fg='blue', bg='gray', font=('Fixdsys', 12))\
             .grid(row=0, column=0, ipady=10, sticky=E)      # 放置静态文字：打开
         Entry(self, textvariable=self.img_path, width=50)\
@@ -82,11 +87,11 @@ class Window(Tk, threading.Thread):
         self.play_btn = ttk.Button(self, text='播放/暂停', state=DISABLED, command=self.thread_start)  # 视频播放按钮，逐帧变化很慢时可快速跳过
         self.play_btn.grid(row=1, column=5)
         Button(self, text='quit', command=self.quit)\
-            .grid(row=1, column=6)      # 推出程序按键
+            .grid(row=1, column=6)      # 退出程序按键
         self.started = False
         self.thread = threading     # 创建一个线程类
         self.event_obj = self.thread.Event()        # 创建线程事件
-        self.independent_task = self.thread.Thread(target=self.btn_play, args=(self.event_obj,))     # 创建一个线程去跑视频
+        self.independent_task = self.thread.Thread(target=self.btn_play, args=(self.event_obj, ))     # 创建一个线程去跑视频
         self.independent_task.setDaemon(True)       # 回收机制
 
     def thread_start(self):     # 将会占满cpu的视频放到独立的线程里跑
@@ -111,11 +116,6 @@ class Window(Tk, threading.Thread):
         if img2open is '':      # 如果中途退出则会返回空字符
             return -1
 
-        img_file = open('config.cfg', 'w')      # 修改配置文件与新的图像路径同步
-        self.config_raw.set("setting", "img2open", img2open)
-        self.config_raw.write(img_file)
-        img_file.close()
-
         self.img_path.set(img2open)     # 修改要显示的图像路径
         if os.path.exists(self.img_path.get()):     # 如果路径没错，清除提示信息
             self.meg.set('')
@@ -130,6 +130,24 @@ class Window(Tk, threading.Thread):
             pass
         self.img_list = iter(self.img_list)
 
+    def create_canvas(self, img):       # 创建画板并放入图片
+        self.img_h, self.img_w, c = img.shape
+        img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        self.show_photo = ImageTk.PhotoImage(img)  # 转换成画板能使用的格式
+        self.canvas = Canvas(self, bg='gray', width=self.winfo_screenwidth() // 2,
+                             height=self.winfo_screenheight() // 2)  # 创建画板
+        self.canvas.create_image(0, 0, anchor=NW, image=self.show_photo)  # 画板左上角对齐格式显示图像
+        self.canvas.bind('<B1-Motion>', self.onLeftButtonMove)  # 画板绑定鼠标左键移动事件
+        self.canvas.bind('<ButtonRelease-1>', self.onLeftButtonUp)  # 绑定松开鼠标左键事件
+        self.canvas.bind('<Button-1>', self.onLeftButtonDown)  # 绑定按下鼠标左键事件
+        self.canvas.grid(row=3, column=0, columnspan=8)  # 给画板安排足够大的空间
+        self.hbar = Scrollbar(self, orient=HORIZONTAL, command=self.canvas.xview)       # 水平滚动条
+        self.hbar.grid(row=4, column=0, columnspan=8, sticky='ew')
+        self.vbar = Scrollbar(self, orient=VERTICAL, command=self.canvas.yview)     # 垂直滚动条
+        self.vbar.grid(row=3, column=16, sticky='sn')
+        self.canvas.config(xscrollcommand=self.hbar.set, yscrollcommand=self.vbar.set)  # 画板设置绑定滚动条
+        self.canvas.config(scrollregion=self.canvas.bbox("all"))
+
     def btn_show(self):     # 显示图像
         img2open = self.img_path.get()      # 要显示图像的路径
         if img2open is '':      # 图像路径存在判断
@@ -137,32 +155,28 @@ class Window(Tk, threading.Thread):
         elif not os.path.exists(img2open):
             self.meg.set('不存在该文件')
         elif img2open.endswith(('.bmp', '.dib', '.png', '.jpg', '.jpeg', '.pbm', '.pgm', '.ppm', '.tif', '.tiff')):
-            img = Image.open(img2open)      # 读取图像
-            self.show_photo = ImageTk.PhotoImage(img)       # 转换成画板能使用的格式
-            self.canvas = Canvas(self, bg='gray', width=self.winfo_screenwidth()//2, height=self.winfo_screenheight()//2)       # 创建画板
-            self.canvas.create_image(0, 0, anchor=NW, image=self.show_photo)        # 画板左上角对齐格式显示图像
-            self.canvas.bind('<B1-Motion>', self.onLeftButtonMove)      # 画板绑定鼠标左键移动事件
-            self.canvas.bind('<ButtonRelease-1>', self.onLeftButtonUp)      # 绑定松开鼠标左键事件
-            self.canvas.bind('<Button-1>', self.onLeftButtonDown)       # 绑定按下鼠标左键事件
-            # self.canvas.bind_all('<KeyPress-q>', self.onKeyDown)      # 绑定快捷键
-            # self.canvas.bind_all('<KeyPress-n>', self.onKeyDown)
-            self.canvas.grid(row=3, column=1, columnspan=15)        # 给画板安排足够大的空间
+            img = cv2.imread(img2open)      # 读取图像
+            if self.canvas is None:
+                self.create_canvas(img)     # 创建画板
+            else:
+                self.img_h, self.img_w, c = img.shape
+                img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                self.show_photo = ImageTk.PhotoImage(img)  # 转换成画板能使用的格式
+                self.canvas.create_image(0, 0, anchor=NW, image=self.show_photo)  # 画板左上角对齐格式显示图像
 
         elif img2open.endswith(('avi', 'mp4', 'rmvb', 'flv')):
             if not self.cap:
                 self.cap = cv2.VideoCapture(img2open)
-                self.play_btn["state"] = NORMAL
+                self.play_btn["state"] = NORMAL     # 按键恢复可用
             ret, img = self.cap.read()
             if ret:
+                if self.canvas is None:
+                    self.create_canvas(img)
+            else:
+                self.img_h, self.img_w, c = img.shape
                 img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-                self.show_photo = ImageTk.PhotoImage(img)       # 转换成画板能使用的格式
-                self.canvas = Canvas(self, bg='gray', width=self.winfo_screenwidth()//2, height=self.winfo_screenheight()//2)       # 创建画板
-                self.canvas.create_image(0, 0, anchor=NW, image=self.show_photo)        # 画板左上角对齐格式显示图像
-                self.canvas.bind('<B1-Motion>', self.onLeftButtonMove)      # 画板绑定鼠标左键移动事件
-                self.canvas.bind('<ButtonRelease-1>', self.onLeftButtonUp)      # 绑定松开鼠标左键事件
-                self.canvas.bind('<Button-1>', self.onLeftButtonDown)       # 绑定按下鼠标左键事件
-                self.canvas.grid(row=3, column=1, columnspan=15)        # 给画板安排足够大的空间
-                # self.meg.set('暂不支持视频格式')
+                self.show_photo = ImageTk.PhotoImage(img)  # 转换成画板能使用的格式
+                self.canvas.create_image(0, 0, anchor=NW, image=self.show_photo)  # 画板左上角对齐格式显示图像
         else:
             self.meg.set('文件类型错误')
 
@@ -173,7 +187,7 @@ class Window(Tk, threading.Thread):
             try:      # 如果文件名是纯数字排序的
                 old_path_num = int(old_path.split('.')[0])
                 new_path_num = int(new_path.split('.')[0])
-                while old_path_num >= new_path_num:
+                while old_path_num >= new_path_num:     # 找到当前文件的后一个文件
                     new_path = self.next_img()
                     new_path_num = int(new_path.split('.')[0])
             except ValueError:     # 如果文件名不是数字排序的
@@ -182,31 +196,22 @@ class Window(Tk, threading.Thread):
                 new_path = self.next_img()
 
             real_path = self.img_father_dir + os.sep + new_path     # 保存当前图像路径
-            img_file = open('config.cfg')
-            self.config_raw.set("setting", "img2open", real_path)
-            self.config_raw.write(img_file)
-            img_file.close()
-
             self.img_path.set(real_path)        # 更改图像路径变量
         self.btn_show()     # 显示更改后的图像
 
     def btn_dir_chg(self):      # 更改保存目录
         dir2open = filedialog.askdirectory()
-        if dir2open is '':
+        if dir2open is '':      # 如果没有选择目录则返回
             return
-        self.dir.set(dir2open)
+        self.dir.set(dir2open)      # 修改要保存图片的目录
         self.config_raw.set('setting', 'dir2open', dir2open)
-        if os.path.exists(dir2open):
+        if os.path.exists(dir2open):        # 清除提示信息
             self.meg.set('')
-        dir_father_dir = os.path.dirname(self.dir.get())
+        dir_father_dir = os.path.dirname(self.dir.get())        # 准备将同级目录都放进列表控件里
         dirs = []
         for sub_dir in os.listdir(dir_father_dir):
             dirs.append(dir_father_dir + os.sep + sub_dir)
-        self.cbb['values'] = dirs
-        directory = open('config.cfg')
-        self.config_raw.set('setting', 'dir2open', dir2open)
-        self.config_raw.write(directory)
-        directory.close()
+        self.cbb['values'] = dirs       # 将读取到的同级目录放入列表控件
 
     def btn_play(self, event):
         ret, img = self.cap.read()
@@ -214,8 +219,8 @@ class Window(Tk, threading.Thread):
             img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
             self.show_photo = ImageTk.PhotoImage(img)  # 转换成画板能使用的格式
             self.canvas.create_image(0, 0, anchor=NW, image=self.show_photo)  # 画板左上角对齐格式显示图像
-            self.canvas.update()
-            cv2.waitKey(20)
+            self.canvas.update()        # 更新画板
+            cv2.waitKey(20)     # 播放速度限制
             ret, img = self.cap.read()
         if not ret:
             self.meg.set('片子已放完')
@@ -223,7 +228,7 @@ class Window(Tk, threading.Thread):
             self.meg.set('vip体验已结束')        # 其实这个问题我也搞不定= =!
 
     def onLeftButtonDown(self, event):      # 按下鼠标左键事件
-        self.canvas_bgn_x.set(event.x)
+        self.canvas_bgn_x.set(event.x)      # 记录开始画框的坐标
         self.canvas_bgn_y.set(event.y)
         # 开始截图
         self.isSelecting = True
@@ -236,7 +241,11 @@ class Window(Tk, threading.Thread):
             self.canvas.delete(self.lastDraw)
         except:
             pass
-        self.lastDraw = self.canvas.create_rectangle(self.canvas_bgn_x.get(), self.canvas_bgn_y.get(), event.x, event.y, outline='green')
+        # 画板坐标的参数应加上被滑动条产生的偏移
+        self.lastDraw = self.canvas.create_rectangle(self.canvas_bgn_x.get() + self.hbar.get()[0]*self.img_w,
+                                                     self.canvas_bgn_y.get() + self.vbar.get()[0]*self.img_h,
+                                                     (event.x + self.hbar.get()[0]*self.img_w),
+                                                     (event.y + self.vbar.get()[0]*self.img_h), outline='green')
 
     def onLeftButtonUp(self, event):        # 鼠标左键松开事件
         # 获取鼠标左键抬起的位置，保存区域截图
@@ -250,7 +259,7 @@ class Window(Tk, threading.Thread):
         top, bottom = sorted([self.canvas_bgn_y.get(), event.y])
 
         self.canvas.update()        # 更新画板参数
-        # 在屏幕上要截图的区域
+        # 在屏幕上要截图的区域。与屏幕左上角的距离+画板与窗口的距离+选择框架与画板的距离+偏移距离
         pic = ImageGrab.grab((self.winfo_x()+self.canvas.winfo_x()+left+10, self.winfo_y()+38+self.canvas.winfo_y()+top,
                               self.winfo_x()+self.canvas.winfo_x()+right+10, self.winfo_y()+38+self.canvas.winfo_y()+bottom))
         # 保存图像文件
@@ -258,14 +267,19 @@ class Window(Tk, threading.Thread):
             self.cnt += 1
         pic.save(self.dir.get() + os.sep + str(self.cnt) + '.jpg')
         self.cnt += 1
-        self.meg.set(self.dir.get() + os.sep + str(self.cnt-1) + '.jpg已保存')     # 修改提升信息
-        print(self.auto_next.get())
-        if self.auto_next.get():
+        self.meg.set(self.dir.get() + os.sep + str(self.cnt-1) + '.jpg已保存')     # 修改提示信息
+        if self.auto_next.get():        # 是否直接切到下一张图片
             self.btn_next()
-            # self.show_photo = PhotoImage(self.img_path.get())
-            # self.canvas.create_image(0, 0, image=self.show_photo)
 
-
+    def destroy(self):      # 退出程序后保存当前进度
+        super(Window, self).destroy()       # 继承tkinter.destroy
+        new_img_path = self.img_path.get()      # 读取当前图片路径和保存目录路径
+        new_dir_path = self.dir.get()
+        cfg_file = open('config.cfg', 'w')      # 修改配置文件与新的图像路径同步
+        self.config_raw.set("setting", "img2open", new_img_path)
+        self.config_raw.set('setting', 'dir2open', new_dir_path)
+        self.config_raw.write(cfg_file)
+        cfg_file.close()        # 保存并关闭文件
 
 window = Window()
 
